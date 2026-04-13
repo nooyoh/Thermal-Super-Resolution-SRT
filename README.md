@@ -14,6 +14,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 pip install segmentation-models-pytorch==0.5.0
 pip install albumentations==2.0.8
 pip install torchmetrics wandb opencv-python matplotlib
+pip install tensorboard
 ```
 
 ## 데이터셋 구조

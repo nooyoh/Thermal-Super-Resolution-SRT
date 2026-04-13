@@ -104,7 +104,7 @@ class Epoch:
                 # 배치 손실 누적
                 loss_value = loss.cpu().detach().numpy()
                 loss_meter.add(loss_value)
-                loss_logs = {self.loss.__name__: loss_meter.mean}
+                loss_logs = {"loss": loss_meter.mean}
                 logs.update(loss_logs)
 
                 # 배치 메트릭 누적

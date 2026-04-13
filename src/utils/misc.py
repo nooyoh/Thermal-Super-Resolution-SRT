@@ -7,12 +7,6 @@ def normalize_data(data):
     data -= 1
     return data
 
-def unnormalize_data(data):
-    # [-1, 1] 범위를 [0, 1]로 역변환
-    data += 1
-    data /= 2
-    return data
-
 def visualize(**images):
     # 여러 이미지를 한 행에 나란히 시각화
     n = len(images)

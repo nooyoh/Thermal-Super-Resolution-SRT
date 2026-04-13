@@ -1,6 +1,6 @@
 import argparse
 from .utils.trainer import train_model
-import wandb
+
 
 def main(args):
     # 학습에 사용할 설정값을 딕셔너리로 묶어 trainer에 전달
@@ -21,13 +21,7 @@ def main(args):
         'w_ssim': args.w_ssim,
         'w_psnr': args.w_psnr,
     }
-    # wandb 실험 추적 초기화
-    # fusion_technique: 두 인코더의 feature를 element-wise max로 융합, 출력 활성화 tanh
-    # 손실 함수 구성: MSE(x) + SSIM항(y/10) + PSNR항(p/10) + Contrastive(beta*z)
-    # 모델 저장 기준: validation SSIM이 최대일 때
-    wandb.init(project="ThermalSuperResolutionFinal", entity="chiomilkchio-smu",
-               config={'model':'resnet34 d5','beta':args.beta, 'fusion_technique':'img 2 encoders max tanh x+beta*z+y/10+p/10 saving:ssim',
-                'lr':args.lr, 'max_ssim':0, 'max_psnr':0}, allow_val_change=True)
+
     train_model(config)
 
 if __name__ == '__main__':

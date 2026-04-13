@@ -1,4 +1,3 @@
-import wandb
 import segmentation_models_pytorch as smp
 from .train_utils import TrainEpoch, ValidEpoch
 from .loss import custom_loss, custom_lossv
@@ -8,13 +7,34 @@ from .model import Unet
 from torchmetrics import StructuralSimilarityIndexMeasure
 from torchmetrics import PeakSignalNoiseRatio
 import torch
+import os
+from datetime import datetime
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 def train(epochs, batch_size, hr_dir, tar_dir, th_dir, hr_val_dir, tar_val_dir, th_val_dir,
-          encoder='resnet34', encoder_weights='imagenet', device='cuda', lr=1e-4, beta=1, w_ssim=0.1, w_psnr=0.1):
+          encoder='resnet34', encoder_weights='imagenet', device='cuda', lr=1e-4, beta=1,
+          w_ssim=0.1, w_psnr=0.1, tensorboard_log_dir=None):
+
+    def write_tensorboard_scalars(writer, logs, stage, epoch):
+        tag_map = {
+            'loss': 'Loss',
+            'ssim': 'SSIM',
+            'psnr': 'PSNR',
+        }
+
+        for log_name, tag_prefix in tag_map.items():
+            if log_name in logs:
+                writer.add_scalar(f'{tag_prefix}/{stage}', float(logs[log_name]), epoch)
 
     # 출력 활성화 함수: tanh → [-1, 1] 범위 출력 (target과 동일한 정규화 범위)
     activation = 'tanh'
+
+    if tensorboard_log_dir is None:
+        run_name = datetime.now().strftime('%Y%m%d-%H%M%S')
+        tensorboard_log_dir = os.path.join('runs', run_name)
+    os.makedirs(tensorboard_log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=tensorboard_log_dir)
 
     model = Unet(
         encoder_name=encoder,
@@ -81,32 +101,29 @@ def train(epochs, batch_size, hr_dir, tar_dir, th_dir, hr_val_dir, tar_val_dir, 
 
     max_ssim = 0
     max_psnr = 0
-    for i in range(0, epochs):
-        print('\nEpoch: {}'.format(i))
-        train_logs = train_epoch.run(train_loader)
-        valid_logs = valid_epoch.run(valid_loader)
-        print(train_logs)
+    try:
+        for i in range(0, epochs):
+            print('\nEpoch: {}'.format(i))
+            train_logs = train_epoch.run(train_loader)
+            valid_logs = valid_epoch.run(valid_loader)
+            print(train_logs)
 
-        # wandb에 학습/검증 지표 기록
-        wandb.log({
-            'epoch': i + 1,
-            't_loss': train_logs['custom_loss'],
-            't_ssim': train_logs['ssim'],
-            't_psnr': train_logs['psnr'],
-            'v_loss': valid_logs['custom_lossv'],
-            'v_ssim': valid_logs['ssim'],
-            'v_psnr': valid_logs['psnr'],
-        })
+            write_tensorboard_scalars(writer, train_logs, 'train', i)
+            write_tensorboard_scalars(writer, valid_logs, 'valid', i)
+            writer.flush()
 
-        # validation SSIM이 개선될 때 모델 저장
-        if max_ssim <= valid_logs['ssim']:
-            max_ssim = valid_logs['ssim']
-            max_psnr = valid_logs['psnr']
-            wandb.config.update({'max_ssim': max_ssim, 'max_psnr': max_psnr}, allow_val_change=True)
-            torch.save(model.state_dict(), './best_model.pth')
-            print('Model saved!')
+            # validation SSIM이 개선될 때 모델 저장
+            if max_ssim <= valid_logs['ssim']:
+                max_ssim = valid_logs['ssim']
+                max_psnr = valid_logs['psnr']
+
+                torch.save(model.state_dict(), './best_model.pth')
+                print('Model saved!')
+    finally:
+        writer.close()
 
     print(f'max ssim: {max_ssim} max psnr: {max_psnr}')
+    print(f'TensorBoard logs saved to: {tensorboard_log_dir}')
 
 
 def train_model(configs):
@@ -114,4 +131,4 @@ def train_model(configs):
           configs['tar_dir'], configs['th_dir'], configs['hr_val_dir'],
           configs['tar_val_dir'], configs['th_val_dir'], configs['encoder'],
           configs['encoder_weights'], configs['device'], configs['lr'], configs['beta'],
-          configs['w_ssim'], configs['w_psnr'])
+          configs['w_ssim'], configs['w_psnr'], configs.get('tensorboard_log_dir'))
