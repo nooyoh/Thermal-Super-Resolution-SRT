@@ -50,39 +50,49 @@ class ContrastiveLoss(nn.Module):
 
 class custom_loss(base.Loss):
     # 학습용 손실 함수: MSE + w_ssim*SSIM항 + w_psnr*PSNR항 + beta*ContrastiveLoss
-    def __init__(self, batch_size, beta, w_ssim=0.1, w_psnr=0.1):
+    def __init__(self, batch_size, beta, w_ssim=0.1, w_psnr=0.1, w_L1=0.1, w_L2 = 0.1):
         super().__init__()
         self.ssim = StructuralSimilarityIndexMeasure()
         self.mse = nn.MSELoss()
+        # L1 Loss 추가
+        self.L1 = nn.L1Loss()
         self.contrast = ContrastiveLoss(batch_size)
         self.psnr = PeakSignalNoiseRatio()
         self.beta = beta
         self.w_ssim = w_ssim
         self.w_psnr = w_psnr
+        self.w_L1 = w_L1
+        self.w_L2 = w_L2
 
     def forward(self, y_pr, y_gt, ft1=None, ft2=None):
-        x = self.mse(y_pr, y_gt)
+        l1_loss = self.L1(y_pr, y_gt)
+        l2_loss = self.mse(y_pr, y_gt)
         y = 1 - self.ssim(y_pr, y_gt)
         z = self.contrast(ft1, ft2)
         # PSNR은 높을수록 좋으므로 40 기준으로 정규화하여 손실로 변환
         p = (1 - self.psnr(y_pr, y_gt) / 40)
-        return x + self.w_ssim * y + self.w_psnr * p + (z * self.beta)
+        return l1_loss * self.w_L1 + l2_loss * self.w_L2 + self.w_ssim * y + self.w_psnr * p + (z * self.beta)
 
 
 class custom_lossv(base.Loss):
     # 검증용 손실 함수: Contrastive Loss 제외 (검증 시 feature 정렬 불필요)
     # MSE + w_ssim*SSIM항 + w_psnr*PSNR항
-    def __init__(self, w_ssim=0.1, w_psnr=0.1):
+    def __init__(self, w_ssim=0.1, w_psnr=0.1, w_L1=0.1, w_L2=0.1):
         super().__init__()
         self.ssim = StructuralSimilarityIndexMeasure()
         self.mse = nn.MSELoss()
+        self.L1 = nn.L1Loss()
         self.psnr = PeakSignalNoiseRatio()
         self.w_ssim = w_ssim
         self.w_psnr = w_psnr
+        self.w_L1 = w_L1
+        self.w_L2 = w_L2
 
     def forward(self, y_pr, y_gt, ft1=None, ft2=None):
-        x = self.mse(y_pr, y_gt)
+        l1_loss = self.L1(y_pr, y_gt)
+        l2_loss = self.mse(y_pr, y_gt)
         y = 1 - self.ssim(y_pr, y_gt)
         p = (1 - self.psnr(y_pr, y_gt) / 40)
-        return x + self.w_ssim * y + self.w_psnr * p
+
+        return l1_loss * self.w_L1 + l2_loss * self.w_L2 + self.w_ssim * y + self.w_psnr * p
         

@@ -15,7 +15,7 @@ import time
 
 def train(epochs, batch_size, hr_dir, tar_dir, th_dir, hr_val_dir, tar_val_dir, th_val_dir,
           encoder='resnet34', encoder_weights='imagenet', device='cuda', lr=1e-4, beta=1,
-          w_ssim=0.1, w_psnr=0.1, tensorboard_log_dir=None):
+          w_ssim=0.1, w_psnr=0.1, w_L2=0.1, w_L1=0.1, tensorboard_log_dir=None):
 
     def write_tensorboard_scalars(writer, logs, stage, epoch):
         tag_map = {
@@ -68,8 +68,8 @@ def train(epochs, batch_size, hr_dir, tar_dir, th_dir, hr_val_dir, tar_val_dir, 
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True)
 
     # 학습용: Contrastive Loss 포함 / 검증용: Contrastive Loss 제외
-    loss = custom_loss(batch_size, beta=beta, w_ssim=w_ssim, w_psnr=w_psnr)
-    lossV = custom_lossv(w_ssim=w_ssim, w_psnr=w_psnr)
+    loss = custom_loss(batch_size, beta=beta, w_ssim=w_ssim, w_psnr=w_psnr, w_L2 = w_L2, w_L1 = w_L1)
+    lossV = custom_lossv(w_ssim=w_ssim, w_psnr=w_psnr, w_L2 = w_L2, w_L1 = w_L1)
 
     # 평가 메트릭: SSIM (구조적 유사도), PSNR (신호 대 잡음비)
     ssim_metric = StructuralSimilarityIndexMeasure()
@@ -137,4 +137,4 @@ def train_model(configs):
           configs['tar_dir'], configs['th_dir'], configs['hr_val_dir'],
           configs['tar_val_dir'], configs['th_val_dir'], configs['encoder'],
           configs['encoder_weights'], configs['device'], configs['lr'], configs['beta'],
-          configs['w_ssim'], configs['w_psnr'], configs.get('tensorboard_log_dir'))
+          configs['w_ssim'], configs['w_psnr'], configs['w_L2'], configs['w_L1'], configs.get('tensorboard_log_dir'))
