@@ -11,6 +11,7 @@ import os
 from datetime import datetime
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+import time
 
 def train(epochs, batch_size, hr_dir, tar_dir, th_dir, hr_val_dir, tar_val_dir, th_val_dir,
           encoder='resnet34', encoder_weights='imagenet', device='cuda', lr=1e-4, beta=1,
@@ -101,6 +102,11 @@ def train(epochs, batch_size, hr_dir, tar_dir, th_dir, hr_val_dir, tar_val_dir, 
 
     max_ssim = 0
     max_psnr = 0
+
+    # 모델 save 폴더
+    model_dir = f'models/{time.strftime("%Y%m%d-%H%M%S")}_model'
+    os.makedirs(model_dir, exist_ok=True)
+
     try:
         for i in range(0, epochs):
             print('\nEpoch: {}'.format(i))
@@ -117,7 +123,7 @@ def train(epochs, batch_size, hr_dir, tar_dir, th_dir, hr_val_dir, tar_val_dir, 
                 max_ssim = valid_logs['ssim']
                 max_psnr = valid_logs['psnr']
 
-                torch.save(model.state_dict(), './best_model.pth')
+                torch.save(model.state_dict(), os.path.join(model_dir, 'best_model.pth'))
                 print('Model saved!')
     finally:
         writer.close()
