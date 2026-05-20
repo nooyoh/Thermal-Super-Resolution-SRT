@@ -1,6 +1,6 @@
 import argparse
+from datetime import datetime
 from pathlib import Path
-from typing import List, Dict
 
 import cv2
 import numpy as np
@@ -8,6 +8,7 @@ import segmentation_models_pytorch as smp
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+# 패키지로 실행(`python -m src.test`)과 직접 실행 양쪽 호환을 위한 import 처리
 try:
     from .utils.model import Unet
     from .utils.transformations import (
@@ -23,6 +24,7 @@ except ImportError:
 
 
 def resolve_existing_path(*candidates: Path) -> Path:
+    # 후보 경로들 중 실제 존재하는 첫 번째 경로를 반환 (없으면 첫 번째 후보 반환)
     for candidate in candidates:
         if candidate.exists():
             return candidate
@@ -30,6 +32,8 @@ def resolve_existing_path(*candidates: Path) -> Path:
 
 
 def extract_sample_key(path: Path) -> str:
+    # VIS-Thermal 매칭용 키 추출 (_vis, _th 접미사 제거)
+    # 예: "0001_vis.png" → "0001", "0001_th.png" → "0001"
     stem = path.stem
     for suffix in ("_vis", "_th"):
         if stem.endswith(suffix):
@@ -38,100 +42,26 @@ def extract_sample_key(path: Path) -> str:
 
 
 def tensor_to_uint8_image(tensor: torch.Tensor) -> np.ndarray:
+    # 모델 출력 텐서 [-1, 1] 범위(tanh) → uint8 이미지 [0, 255]로 변환
     image = tensor.detach().cpu().squeeze().numpy()
     image = np.clip((image + 1.0) / 2.0, 0.0, 1.0)
     image = (image * 255.0).round().astype(np.uint8)
     return image
 
 
-def compute_psnr(pred: np.ndarray, gt: np.ndarray) -> float:
-    mse = np.mean((pred.astype(float) - gt.astype(float)) ** 2)
-    return 10 * np.log10(255 ** 2 / mse) if mse > 0 else 100.0
-
-
-def compute_ssim(pred: np.ndarray, gt: np.ndarray) -> float:
-    pred = pred.astype(float)
-    gt = gt.astype(float)
-    C1 = (0.01 * 255) ** 2
-    C2 = (0.03 * 255) ** 2
-    mu_pred = np.mean(pred)
-    mu_gt = np.mean(gt)
-    sigma_pred = np.var(pred)
-    sigma_gt = np.var(gt)
-    sigma_cross = np.mean((pred - mu_pred) * (gt - mu_gt))
-    numerator = (2 * mu_pred * mu_gt + C1) * (2 * sigma_cross + C2)
-    denominator = (mu_pred ** 2 + mu_gt ** 2 + C1) * (sigma_pred + sigma_gt + C2)
-    return float(numerator / denominator)
-
-
-def build_gt_map(gt_dir: Path) -> Dict[str, Path]:
-    # GT 폴더에서 key → 파일 경로 매핑 생성
-    return {
-        extract_sample_key(path): path
-        for path in sorted(gt_dir.iterdir())
-        if path.is_file()
-    }
-
-
-def save_eval_results(
-    results: List[Dict],
-    eval_metric: str,
-    top_k: int,
-    eval_dir: Path,
-) -> None:
-    # eval_metric 기준으로 내림차순 정렬
-    sorted_results = sorted(results, key=lambda x: x[eval_metric], reverse=True)
-    top_results = sorted_results[:top_k]
-    bottom_results = sorted_results[-top_k:]
-
-    top_dir = eval_dir / f"top{top_k}"
-    bottom_dir = eval_dir / f"bottom{top_k}"
-    top_dir.mkdir(parents=True, exist_ok=True)
-    bottom_dir.mkdir(parents=True, exist_ok=True)
-
-    for result in top_results:
-        key = result["key"]
-        cv2.imwrite(str(top_dir / f"{key}_sr.png"), result["sr_image"])
-        if result["preview_image"] is not None:
-            cv2.imwrite(str(top_dir / f"{key}_preview.png"), result["preview_image"])
-
-    for result in bottom_results:
-        key = result["key"]
-        cv2.imwrite(str(bottom_dir / f"{key}_sr.png"), result["sr_image"])
-        if result["preview_image"] is not None:
-            cv2.imwrite(str(bottom_dir / f"{key}_preview.png"), result["preview_image"])
-
-    print(f"Saved top{top_k} → {top_dir}")
-    print(f"Saved bottom{top_k} → {bottom_dir}")
-
-
-def make_preview_image(
-    visible_preview: np.ndarray,
-    thermal_preview: np.ndarray,
-    prediction_image: np.ndarray,
-) -> np.ndarray:
-    if thermal_preview.ndim == 3:
-        thermal_preview_gray = cv2.cvtColor(thermal_preview, cv2.COLOR_BGR2GRAY)
-    else:
-        thermal_preview_gray = thermal_preview
-
-    thermal_preview_bgr = cv2.cvtColor(thermal_preview_gray, cv2.COLOR_GRAY2BGR)
-    sr_preview_bgr = cv2.cvtColor(prediction_image, cv2.COLOR_GRAY2BGR)
-    visible_preview_bgr = cv2.cvtColor(visible_preview, cv2.COLOR_RGB2BGR)
-
-    return np.concatenate([visible_preview_bgr, thermal_preview_bgr, sr_preview_bgr], axis=1)
-
-
 class ThermalTestDataset(Dataset):
+    # 추론용 데이터셋: VIS HR과 Thermal LR 페어를 키로 매칭하여 로드
     def __init__(self, visible_dir: Path, thermal_dir: Path, encoder: str, encoder_weights: str):
         self.visible_dir = visible_dir
         self.thermal_dir = thermal_dir
         self.samples = self._build_samples()
+        # 학습 때와 동일한 인코더 전처리 함수 사용 (ImageNet 정규화 등)
         preprocessing_fn = smp.encoders.get_preprocessing_fn(encoder, encoder_weights)
         self.augmentation = get_validation_augmentation()
         self.preprocessing = get_preprocessing(preprocessing_fn)
 
     def _build_samples(self):
+        # 양쪽 폴더를 키 기준으로 매핑한 뒤 공통 키만 추출
         visible_map = {
             extract_sample_key(path): path
             for path in sorted(self.visible_dir.iterdir())
@@ -164,6 +94,7 @@ class ThermalTestDataset(Dataset):
     def __getitem__(self, index):
         sample = self.samples[index]
 
+        # cv2는 기본적으로 BGR로 읽음
         visible = cv2.imread(str(sample["visible_path"]))
         thermal = cv2.imread(str(sample["thermal_path"]))
 
@@ -172,11 +103,14 @@ class ThermalTestDataset(Dataset):
         if thermal is None:
             raise FileNotFoundError(f"Failed to read thermal image: {sample['thermal_path']}")
 
+        # 모델은 RGB 입력을 기대하므로 변환
         visible_rgb = cv2.cvtColor(visible, cv2.COLOR_BGR2RGB)
+        # albumentations의 additional_targets로 VIS와 Thermal에 동일한 변환 적용
         augmented = self.augmentation(image=visible_rgb, image1=thermal)
         visible_aug = augmented["image"]
         thermal_aug = augmented["image1"]
 
+        # 전처리 (정규화 + HWC → CHW 텐서 변환)
         visible_tensor = self.preprocessing(image=visible_aug)["image"]
         thermal_tensor = self.preprocessing(image=thermal_aug)["image"]
 
@@ -184,12 +118,12 @@ class ThermalTestDataset(Dataset):
             "key": sample["key"],
             "visible_tensor": visible_tensor,
             "thermal_tensor": thermal_tensor,
-            "visible_preview": visible_aug,
-            "thermal_preview": thermal_aug,
         }
 
 
 def build_model(encoder: str, encoder_weights: str, device: torch.device) -> torch.nn.Module:
+    # 학습 시 구성과 동일하게 모델 생성 (Dual Encoder + Contrastive head)
+    # checkpoint의 키와 일치해야 하므로 fusion/contrastive 옵션을 그대로 켜둠
     model = Unet(
         encoder_name=encoder,
         encoder_weights=encoder_weights,
@@ -208,6 +142,7 @@ def run_inference(args):
     current_file = Path(__file__).resolve()
     project_root = current_file.parent.parent
 
+    # 데이터셋 루트: --dataset_root 미지정 시 후보 폴더에서 자동 탐색
     dataset_root = (
         Path(args.dataset_root).resolve()
         if args.dataset_root
@@ -217,6 +152,7 @@ def run_inference(args):
         )
     )
 
+    # 입력 폴더 경로 결정 (CLI 인자가 우선, 없으면 데이터셋 루트 기준 기본 구조 사용)
     if args.visible_dir is None:
         visible_dir = dataset_root / "visible" / "test" / f"guided_{args.scale}"
     else:
@@ -227,6 +163,7 @@ def run_inference(args):
     else:
         thermal_dir = Path(args.thermal_dir).resolve()
 
+    # 체크포인트 경로 결정
     checkpoint_path = (
         Path(args.checkpoint).resolve()
         if args.checkpoint
@@ -236,16 +173,17 @@ def run_inference(args):
         )
     )
 
+    # SR 결과 저장 폴더 (기본: outputs/YYYYMMDD-HHMMSS/)
+    # 실행 시각으로 하위 폴더를 만들어 이전 결과를 덮어쓰지 않도록 함
+    run_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_dir = (
         Path(args.output_dir).resolve()
         if args.output_dir
-        else project_root / "outputs" / f"test_{args.scale}"
+        else project_root / "outputs" / run_stamp
     )
-    sr_dir = output_dir / "sr"
-    preview_dir = output_dir / "preview"
-    sr_dir.mkdir(parents=True, exist_ok=True)
-    preview_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
+    # 필수 경로 검증
     if not visible_dir.exists():
         raise FileNotFoundError(f"Visible test directory not found: {visible_dir}")
     if not thermal_dir.exists():
@@ -253,21 +191,13 @@ def run_inference(args):
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    # 평가 모드 설정
-    eval_mode = args.gt_dir is not None
-    gt_map: Dict[str, Path] = {}
-    if eval_mode:
-        gt_dir = Path(args.gt_dir).resolve()
-        if not gt_dir.exists():
-            raise FileNotFoundError(f"GT directory not found: {gt_dir}")
-        gt_map = build_gt_map(gt_dir)
-        eval_dir = current_file.parent / "eval_results"
-
+    # 디바이스 자동 선택 (GPU 사용 가능 시 cuda)
     device_name = args.device
     if device_name == "auto":
         device_name = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_name)
 
+    # 데이터 로더 (추론은 순서 유지를 위해 shuffle=False)
     dataset = ThermalTestDataset(
         visible_dir=visible_dir,
         thermal_dir=thermal_dir,
@@ -281,87 +211,49 @@ def run_inference(args):
         num_workers=args.num_workers,
     )
 
+    # 모델 생성 후 체크포인트 가중치 로드 (strict=True: 키 누락/추가 시 에러)
     model = build_model(args.encoder, args.encoder_weights, device)
     state_dict = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(state_dict, strict=True)
 
+    # 추론 루프: 모든 입력 페어에 대해 SR 이미지를 생성하여 저장
     saved_count = 0
-    eval_results: List[Dict] = []
-
     with torch.no_grad():
         for batch in dataloader:
             visible_tensor = batch["visible_tensor"].to(device)
             thermal_tensor = batch["thermal_tensor"].to(device)
+            # model.predict는 contrastive head 출력을 제외하고 SR 마스크만 반환
             predictions = model.predict(visible_tensor, thermal_tensor)
 
             for index in range(predictions.shape[0]):
                 key = batch["key"][index]
                 prediction_image = tensor_to_uint8_image(predictions[index])
-
-                preview_image = None
-                if args.save_preview or eval_mode:
-                    visible_preview = batch["visible_preview"][index].numpy().astype(np.uint8)
-                    thermal_preview = batch["thermal_preview"][index].numpy().astype(np.uint8)
-                    preview_image = make_preview_image(visible_preview, thermal_preview, prediction_image)
-
-                if eval_mode:
-                    # GT와 비교하여 PSNR/SSIM 계산 후 메모리에 보관
-                    if key not in gt_map:
-                        continue
-                    gt_image = cv2.imread(str(gt_map[key]), cv2.IMREAD_GRAYSCALE)
-                    if gt_image is None:
-                        continue
-                    psnr_value = compute_psnr(prediction_image, gt_image)
-                    ssim_value = compute_ssim(prediction_image, gt_image)
-                    eval_results.append({
-                        "key": key,
-                        "psnr": psnr_value,
-                        "ssim": ssim_value,
-                        "sr_image": prediction_image,
-                        "preview_image": preview_image,
-                    })
-                else:
-                    # 기존 동작: 전체 이미지 저장
-                    sr_path = sr_dir / f"{key}_sr.png"
-                    cv2.imwrite(str(sr_path), prediction_image)
-
-                    if args.save_preview and preview_image is not None:
-                        preview_path = preview_dir / f"{key}_preview.png"
-                        cv2.imwrite(str(preview_path), preview_image)
-
+                sr_path = output_dir / f"{key}_sr.png"
+                cv2.imwrite(str(sr_path), prediction_image)
                 saved_count += 1
 
-    if eval_mode:
-        save_eval_results(eval_results, args.eval_metric, args.top_k, eval_dir)
-    else:
-        print(f"Checkpoint: {checkpoint_path}")
-        print(f"Visible test dir: {visible_dir}")
-        print(f"Thermal test dir: {thermal_dir}")
-        print(f"SR images saved to: {sr_dir}")
-        if args.save_preview:
-            print(f"Preview images saved to: {preview_dir}")
-
+    # 실행 결과 요약 출력
+    print(f"Checkpoint: {checkpoint_path}")
+    print(f"Visible test dir: {visible_dir}")
+    print(f"Thermal test dir: {thermal_dir}")
+    print(f"SR images saved to: {output_dir}")
     print(f"Processed {saved_count} samples on {device}.")
 
 
 def build_parser():
+    # CLI 인자 정의
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_root", type=str, default=None)
-    parser.add_argument("--scale", type=str, default="x8", choices=["x8", "x16"])
-    parser.add_argument("--visible_dir", type=str, default=None)
-    parser.add_argument("--thermal_dir", type=str, default=None)
-    parser.add_argument("--checkpoint", type=str, default=None)
-    parser.add_argument("--output_dir", type=str, default=None)
+    parser.add_argument("--dataset_root", type=str, default=None)            # 데이터셋 루트 폴더
+    parser.add_argument("--scale", type=str, default="x8", choices=["x8", "x16"])  # 업스케일 배율
+    parser.add_argument("--visible_dir", type=str, default=None)             # VIS HR 입력 폴더
+    parser.add_argument("--thermal_dir", type=str, default=None)             # Thermal LR 입력 폴더
+    parser.add_argument("--checkpoint", type=str, default=None)              # 학습된 모델 가중치 경로
+    parser.add_argument("--output_dir", type=str, default=None)              # SR 결과 저장 폴더
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--device", type=str, default="auto")
-    parser.add_argument("--encoder", type=str, default="resnet34")
+    parser.add_argument("--device", type=str, default="auto")                # auto / cuda / cpu
+    parser.add_argument("--encoder", type=str, default="resnet34")           # 학습 때 사용한 인코더와 동일해야 함
     parser.add_argument("--encoder_weights", type=str, default="imagenet")
-    parser.add_argument("--save_preview", action="store_true")
-    # 평가 모드 인자
-    parser.add_argument("--gt_dir", type=str, default=None)
-    parser.add_argument("--top_k", type=int, default=5)
-    parser.add_argument("--eval_metric", type=str, default="psnr", choices=["psnr", "ssim"])
     return parser
 
 
