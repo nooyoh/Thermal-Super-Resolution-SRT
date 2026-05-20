@@ -255,12 +255,10 @@ def build_parser():
     parser.add_argument("--encoder_weights", type=str, default="imagenet")
     return parser
 
-
 def main():
     parser = build_parser()
     args = parser.parse_args()
     run_inference(args)
-
 
 if __name__ == "__main__":
     main()
