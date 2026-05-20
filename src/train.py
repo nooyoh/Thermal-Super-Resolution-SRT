@@ -20,6 +20,8 @@ def main(args):
         'beta': args.beta,
         'w_ssim': args.w_ssim,
         'w_psnr': args.w_psnr,
+        'w_L1': args.w_L1,
+        'w_L2': args.w_L2
     }
 
     train_model(config)
@@ -46,6 +48,8 @@ if __name__ == '__main__':
     parser.add_argument('--beta', type=float, required=False, default=1)
     parser.add_argument('--w_ssim', type=float, required=False, default=0.1)
     parser.add_argument('--w_psnr', type=float, required=False, default=0.1)
+    parser.add_argument('--w_L1', type=float, required=False, default=0.1)
+    parser.add_argument('--w_L2', type=float, required=False, default=0.1)
     # 코드 동작 확인용: epochs=1, batch_size=2로 빠르게 실행
     parser.add_argument('--test', action='store_true', help='Run 1 epoch with batch_size=2 to verify code')
     arguments = parser.parse_args()

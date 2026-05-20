@@ -55,6 +55,8 @@ python -m src.train --epochs 100 --batch_size 8 --lr 1e-4 --beta 1 --w_ssim 0.1 
 | `--beta` | 1 | Contrastive Loss 가중치 |
 | `--w_ssim` | 0.1 | SSIM Loss 가중치 |
 | `--w_psnr` | 0.1 | PSNR Loss 가중치 |
+| `--w_L1` | 9.5 | L1 Loss 가중치 |
+| `--w_L2` | 0.5 | L2 Loss 가중치 |
 | `--encoder` | resnet34 | 인코더 종류 |
 | `--test` | - | 빠른 동작 확인 모드 |
 
