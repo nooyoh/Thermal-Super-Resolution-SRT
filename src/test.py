@@ -8,7 +8,6 @@ import segmentation_models_pytorch as smp
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-# 패키지로 실행(`python -m src.test`)과 직접 실행 양쪽 호환을 위한 import 처리
 try:
     from .utils.model import Unet
     from .utils.transformations import (
